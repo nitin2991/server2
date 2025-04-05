@@ -7,11 +7,11 @@
 #include <arpa/inet.h>
 #include <time.h>
 
-#define MAX_THREADS 1200
+#define MAX_THREADS 50
 #define PAYLOAD_SIZE 1024  // Optimal payload size for most networks
 
 // Expiry date (Format: YYYY-MM-DD)
-#define EXPIRY_DATE "2095-08-9"
+#define EXPIRY_DATE "2025-08-9"
 
 // Define the AttackParams structure
 typedef struct {
@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
 
     // Check if the program is expired
     if (is_expired()) {
-        printf("BUY NEW FROM @Nitin_510\n");
+        printf("BUY NEW FROM @IPxKINGYT\n");
         return 1;
     }
 
